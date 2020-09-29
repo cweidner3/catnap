@@ -93,11 +93,11 @@ def _build(this_dir: Path, build_dir: Path, args):
         'cmake',
         '--build', str(build_dir),
     ]
-    if args.verbose:
+    if hasattr(args, 'verbose') and args.verbose:
         cmd.append('--verbose')
     logging.info('Running -> %s', ' '.join(cmd))
     proc = subprocess.run(cmd, cwd=build_dir, env=os.environ, check=False)
-    if proc.returncode != 0 or args.notest:
+    if proc.returncode != 0 or (hasattr(args, 'notest') and args.notest):
         return proc.returncode
     cmd = ['ctest', '-V']
     logging.info('Running -> %s', ' '.join(cmd))
