@@ -45,3 +45,15 @@ TEST(Route, FromABoostRequest)
     EXPECT_EQ(header_val, "UnitTesting.blah");
     EXPECT_EQ(pub_req.body(), "Test");
 }
+
+TEST(Route, ToABoostResponse)
+{
+    Response pub_resp(200, R"~({"foo": "bar"})~", "application/json");
+    auto resp = to_boost_response(pub_resp);
+    EXPECT_EQ(resp.result_int(), 200);
+    EXPECT_EQ(resp.body(), std::string(R"~({"foo": "bar"})~"));
+    auto it = resp.find(boost::beast::http::field::content_type);
+    EXPECT_FALSE(it == resp.end());
+    EXPECT_EQ(it->value(), std::string("application/json"));
+    EXPECT_EQ(resp.version(), 11);
+}

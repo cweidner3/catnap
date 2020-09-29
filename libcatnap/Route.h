@@ -5,12 +5,22 @@
 #include <string_view>
 #include <map>
 
+#include <iostream>
+
 template<bool isRequest>
 class Headers;
 
 template<>
 class Headers<true>
 {
+        std::map<std::string, std::string> _headers;
+        unsigned _version;
+        std::string _method;
+        std::string _route;
+        std::map<std::string, std::string> _params;
+
+        using iterator = std::map<std::string, std::string>::iterator;
+
     public:
         /**
          * Getter and Setter for the HTTP version.
@@ -81,6 +91,24 @@ class Headers<true>
             return false;
         }
 
+        iterator headers_begin()
+        {
+            return this->_headers.begin();
+        }
+        iterator headers_end()
+        {
+            return this->_headers.end();
+        }
+
+        iterator params_begin()
+        {
+            return this->_params.begin();
+        }
+        iterator params_end()
+        {
+            return this->_params.end();
+        }
+
         /**
          * Add a param.
          *
@@ -123,18 +151,17 @@ class Headers<true>
                 });
             return s;
         };
-
-    private:
-        std::map<std::string, std::string> _headers;
-        unsigned _version;
-        std::string _method;
-        std::string _route;
-        std::map<std::string, std::string> _params;
 };
 
 template<>
 class Headers<false>
 {
+        std::map<std::string, std::string> _headers;
+        unsigned _version = 11;
+        int _status_code = 200;
+
+        using iterator = std::map<std::string, std::string>::iterator;
+
     public:
         /**
          * Getter and Setter for the HTTP version.
@@ -193,6 +220,15 @@ class Headers<false>
             return false;
         }
 
+        iterator headers_begin()
+        {
+            return this->_headers.begin();
+        }
+        iterator headers_end()
+        {
+            return this->_headers.end();
+        }
+
     private:
         std::string str_to_lower (std::string s)
         {
@@ -202,35 +238,59 @@ class Headers<false>
                 });
             return s;
         };
-
-    private:
-        std::map<std::string, std::string> _headers;
-        unsigned _version;
-        int _status_code;
 };
 
 template <bool isRequest>
 class BaseMessage {
+        Headers<isRequest> _headers;
+        std::string _body;
+
     public:
         enum class BodyType {
             STRING, FILE_
         };
 
     public:
+        BaseMessage<isRequest>()
+        {
+        }
 
-        Headers<isRequest> & headers()
+        BaseMessage<isRequest>(int status_code)
+        {
+            this->_headers.status_code(status_code);
+        }
+
+        BaseMessage<isRequest>(int status_code, const std::string &message,
+                const std::string &content_type = "text/plain")
+        {
+            this->_headers.status_code(status_code);
+            this->_body = message;
+            this->headers().add_header("Content-Type", content_type);
+        }
+
+    public:
+
+        Headers<isRequest> & headers() & noexcept
+        {
+            return this->_headers;
+        }
+        Headers<isRequest> && headers() && noexcept
+        {
+            return std::move(this->_headers);
+        }
+        Headers<isRequest> const & headers() const& noexcept
         {
             return this->_headers;
         }
         void headers(const Headers<isRequest> &headers)
         {
-            this->_headers = headers;;
+            this->_headers = headers;
         }
 
         /**
          * Set or get the body of the message
          */
-        std::string body() const
+        std::string & body()
         {
             return this->_body;
         }
@@ -238,10 +298,6 @@ class BaseMessage {
         {
             this->_body = body;
         }
-
-    private:
-        Headers<isRequest> _headers;
-        std::string _body;
 };
 
 using Request = BaseMessage<true>;
@@ -251,6 +307,11 @@ class Route {
     public:
         typedef Response (*route_cb_t) (const Request &);
 
+    protected:
+        std::string _route;
+        route_cb_t _callback;
+        std::string _method;
+
     public:
         explicit Route(std::string route, route_cb_t cb, std::string method = "GET");
         virtual ~Route();
@@ -259,16 +320,14 @@ class Route {
         std::string method() const;
         std::string route() const;
         route_cb_t callback() const;
-
-    protected:
-        std::string _route;
-        route_cb_t _callback;
-        std::string _method;
 };
 
 #include <boost/beast.hpp>
 
 class PrivateRoute {
+    protected:
+        Route _route;
+
     public:
         explicit PrivateRoute(Route route);
         virtual ~PrivateRoute();
@@ -278,9 +337,6 @@ class PrivateRoute {
                 boost::beast::http::string_body> &request);
 
         bool operator==(const Route &rhs) const;
-
-    protected:
-        Route _route;
 };
 
 template <typename T>
@@ -294,6 +350,17 @@ static inline Request from_boost_request(
     req.headers().version(request.version());
     req.headers().method(request.method_string().to_string());
     req.headers().route(request.target().to_string());
+    for (boost::beast::http::fields::iterator it=request.base().begin()
+            ; it!=request.base().end()
+            ; it++) {
+        if (it->name() == boost::beast::http::field::version) {
+            continue;
+        }
+        req.headers().add_header(
+            std::string(it->name_string()),
+            std::string(it->value()));
+    }
+    req.body() = request.body();
     return req;
 }
 
@@ -303,6 +370,11 @@ static inline auto to_boost_response(Response &response)
     resp.result(response.headers().status_code());
     resp.version(response.headers().version());
     resp.body() = response.body();
+    for (auto it = response.headers().headers_begin()
+            ; it != response.headers().headers_end()
+            ; it++) {
+        resp.insert(it->first, it->second);
+    }
     return resp;
 }
 
